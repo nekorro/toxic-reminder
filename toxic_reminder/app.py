@@ -5,9 +5,11 @@ import logging
 import pathlib
 import sys
 
+import AppKit
 import rumps
 
 from . import config as config_mod
+from . import launchagent
 from .banner import show_banner
 from .caldav_client import fetch_events
 from .scheduler import Scheduler
@@ -39,6 +41,13 @@ def _local_datetime(when: dt.datetime) -> str:
     return when.astimezone().strftime("%d.%m %H:%M")
 
 
+def _open_url(link: str) -> None:
+    """Открыть ссылку системным способом (браузер по умолчанию)."""
+    url = AppKit.NSURL.URLWithString_(link)
+    if url is not None:
+        AppKit.NSWorkspace.sharedWorkspace().openURL_(url)
+
+
 class ToxicReminderApp(rumps.App):
     def __init__(self) -> None:
         super().__init__("toxic-reminder", icon=_ICON_PATH, quit_button=None)
@@ -47,17 +56,25 @@ class ToxicReminderApp(rumps.App):
             allowed_notification_window=self.config.allowed_notification_window
         )
         self.muted = False
+        self._current_link = None
+        self._next_link = None
 
+        self.current_item = rumps.MenuItem("Нет активной встречи")
         self.next_item = rumps.MenuItem("Загрузка…")
+        self.agent_item = rumps.MenuItem("Запустить агент", callback=self.on_toggle_agent)
         self.menu = [
+            self.current_item,
             self.next_item,
             None,
             rumps.MenuItem("Обновить", callback=self.on_refresh),
             rumps.MenuItem("Показать тестовую нотификацию", callback=self.on_test_banner),
             rumps.MenuItem("Замьютить нотификации", callback=self.on_toggle_mute),
             None,
+            self.agent_item,
+            None,
             rumps.MenuItem("Выход", callback=self.on_quit),
         ]
+        self._sync_agent_item()
 
         self._refresh_timer = rumps.Timer(self.on_refresh, self.config.refresh_interval_sec)
         self._tick_timer = rumps.Timer(self.on_tick, _TICK_SECONDS)
@@ -93,11 +110,33 @@ class ToxicReminderApp(rumps.App):
         self._update_menu()
 
     def _update_menu(self) -> None:
-        nxt = self.scheduler.next_event(self._now())
+        now = self._now()
+        current = self.scheduler.current_event(now)
+        nxt = self.scheduler.next_event(now)
+
+        self._current_link = current.link if current else None
+        if current is None:
+            self.current_item.title = "Нет активной встречи"
+            self.current_item.set_callback(None)
+        else:
+            self.current_item.title = f"▶ Сейчас: {_local_time(current.start)} — {current.title}"
+            self.current_item.set_callback(self.on_open_current if current.link else None)
+
+        self._next_link = nxt.link if nxt else None
         if nxt is None:
             self.next_item.title = f"Нет встреч следующие {self.config.lookahead_hours}h"
+            self.next_item.set_callback(None)
         else:
-            self.next_item.title = f"{_local_datetime(nxt.start)} — {nxt.title}"
+            self.next_item.title = f"Далее: {_local_datetime(nxt.start)} — {nxt.title}"
+            self.next_item.set_callback(self.on_open_next if nxt.link else None)
+
+    def on_open_current(self, _) -> None:
+        if self._current_link:
+            _open_url(self._current_link)
+
+    def on_open_next(self, _) -> None:
+        if self._next_link:
+            _open_url(self._next_link)
 
     def on_toggle_mute(self, sender) -> None:
         self.muted = not self.muted
@@ -107,6 +146,33 @@ class ToxicReminderApp(rumps.App):
 
     def on_test_banner(self, _) -> None:
         show_banner("Тестовая встреча", _local_time(self._now()), _TEST_LINK)
+
+    def _sync_agent_item(self) -> None:
+        self.agent_item.title = (
+            "Остановить агент" if launchagent.is_installed() else "Запустить агент"
+        )
+
+    def on_toggle_agent(self, _) -> None:
+        if launchagent.is_installed():
+            # Остановить: удалить агент (откл. автозапуск и автоперезапуск).
+            log.info("stopping agent (uninstall)")
+            try:
+                launchagent.uninstall()
+            except Exception as exc:
+                log.exception("agent uninstall failed")
+                rumps.alert("Остановка агента", str(exc))
+            self._sync_agent_item()
+        else:
+            # Запустить агент с автозапуском+автоперезапуском и закрыть текущий процесс.
+            log.info("installing agent and handing off")
+            try:
+                launchagent.install(keep_alive=True)
+            except Exception as exc:
+                log.exception("agent install failed")
+                rumps.alert("Запуск агента", str(exc))
+                self._sync_agent_item()
+                return
+            rumps.quit_application()
 
     def on_quit(self, _) -> None:
         rumps.quit_application()

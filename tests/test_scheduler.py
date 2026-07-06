@@ -66,3 +66,40 @@ def test_next_event_none_when_empty():
     s = Scheduler()
     s.update_events([])
     assert s.next_event(NOW) is None
+
+
+def _span(uid, start_s, end_s, link="https://telemost.yandex.ru/j/x"):
+    return Event(uid=uid, title=uid,
+                 start=NOW + timedelta(seconds=start_s),
+                 link=link,
+                 end=NOW + timedelta(seconds=end_s))
+
+
+def test_current_event_active():
+    s = Scheduler()
+    s.update_events([_span("m", -60, 600)])
+    assert s.current_event(NOW).uid == "m"
+
+
+def test_current_event_none_before_start():
+    s = Scheduler()
+    s.update_events([_span("m", 60, 600)])
+    assert s.current_event(NOW) is None
+
+
+def test_current_event_none_after_end():
+    s = Scheduler()
+    s.update_events([_span("m", -600, -60)])
+    assert s.current_event(NOW) is None
+
+
+def test_current_event_ignores_missing_end():
+    s = Scheduler()
+    s.update_events([_ev("m", -60)])  # end=None
+    assert s.current_event(NOW) is None
+
+
+def test_current_event_earliest_start_on_overlap():
+    s = Scheduler()
+    s.update_events([_span("late", -30, 600), _span("early", -120, 600)])
+    assert s.current_event(NOW).uid == "early"

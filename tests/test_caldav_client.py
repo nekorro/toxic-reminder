@@ -63,3 +63,24 @@ def test_results_sorted_by_start():
     b = _ics("b", "Раньше", NOW + timedelta(hours=1))
     events = parse_events([a, b], NOW, timedelta(hours=24))
     assert [e.uid for e in events] == ["b", "a"]
+
+
+def test_event_end_from_dtend():
+    start = NOW + timedelta(hours=1)
+    end = start + timedelta(minutes=30)
+    ics = _ics("u", "T", start, f"DTEND:{end.strftime('%Y%m%dT%H%M%SZ')}\r\n")
+    ev = parse_events([ics], NOW, timedelta(hours=24))[0]
+    assert ev.end == end
+
+
+def test_event_end_from_duration():
+    start = NOW + timedelta(hours=1)
+    ics = _ics("u", "T", start, "DURATION:PT30M\r\n")
+    ev = parse_events([ics], NOW, timedelta(hours=24))[0]
+    assert ev.end == start + timedelta(minutes=30)
+
+
+def test_event_end_none_when_absent():
+    start = NOW + timedelta(hours=1)
+    ev = parse_events([_ics("u", "T", start)], NOW, timedelta(hours=24))[0]
+    assert ev.end is None

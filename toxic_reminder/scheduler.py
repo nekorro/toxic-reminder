@@ -24,6 +24,13 @@ class Scheduler:
         upcoming = [e for e in self._events if e.start >= now]
         return min(upcoming, key=lambda e: e.start) if upcoming else None
 
+    def current_event(self, now: datetime) -> Event | None:
+        """Активная сейчас встреча (start <= now < end). Без end — не считается
+        активной. При наложении — самая рано начавшаяся."""
+        active = [e for e in self._events
+                  if e.end is not None and e.start <= now < e.end]
+        return min(active, key=lambda e: e.start) if active else None
+
     def tick(self, now: datetime) -> list[Event]:
         """Вернуть события в окне ±allowed_notification_window вокруг старта,
         которые ещё не показывались. Помечает их как показанные."""

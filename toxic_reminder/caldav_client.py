@@ -28,6 +28,17 @@ def _to_utc(value) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+def _event_end(comp, start: datetime) -> datetime | None:
+    """Конец встречи: DTEND, иначе DTSTART+DURATION, иначе None."""
+    dtend = comp.get("DTEND")
+    if dtend is not None:
+        return _to_utc(dtend.dt)
+    duration = comp.get("DURATION")
+    if duration is not None:
+        return start + duration.dt
+    return None
+
+
 def _link_fields(comp) -> dict[str, str]:
     """Строковые поля VEVENT, в которых может встретиться ссылка на встречу."""
     fields = {
@@ -64,6 +75,7 @@ def parse_events(
                     title=str(comp.get("SUMMARY", "(без названия)")),
                     start=start,
                     link=extract_link(_link_fields(comp), patterns),
+                    end=_event_end(comp, start),
                 )
             )
 
